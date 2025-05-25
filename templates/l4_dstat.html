@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>L4 UDP Dstat - iDOM</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.7.0/dist/chart.min.js"></script>
+    <style>
+        body {
+            background-color: #050505;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: calc(100vh - 40px);
+        }
+        .header-controls {
+            width: 95%;
+            max-width: 1200px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .main-title {
+            color: #ffffff;
+            font-size: 2em;
+            font-weight: 300;
+            margin-bottom: 5px;
+        }
+        .info-bar {
+            color: #888888;
+            font-size: 0.9em;
+            margin-bottom: 20px;
+        }
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .action-button, .back-button {
+            background-color: rgba(40, 40, 40, 0.8);
+            color: #cccccc;
+            border: 1px solid #333333;
+            padding: 10px 18px;
+            font-size: 0.9em;
+            cursor: pointer;
+            border-radius: 6px;
+            text-decoration: none;
+            transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+        }
+        .action-button:hover, .back-button:hover {
+            background-color: #007bff;
+            border-color: #0056b3;
+            color: #ffffff;
+        }
+        .graph-container {
+            width: 95vw;
+            max-width: 1200px;
+            height: 50vh; 
+            min-height: 280px;
+            background-color: rgba(15, 15, 15, 0.75);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+            margin-bottom: 25px;
+        }
+        .stats-container {
+            width: 95vw;
+            max-width: 1200px;
+            background-color: rgba(15, 15, 15, 0.75);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
+            padding: 20px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        .stat-item {
+            text-align: center;
+            min-width: 160px;
+            padding: 10px;
+        }
+        .stat-label {
+            color: #aaaaaa;
+            font-size: 0.85em;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .stat-value {
+            color: #ffffff;
+            font-size: 1.5em;
+            font-weight: 500;
+        }
+        .footer-credits {
+            margin-top: 30px;
+            font-size: 0.75em;
+            color: #555555;
+        }
+    </style>
+</head>
+<body>
+    <div class="header-controls">
+        <a href="/" class="back-button">Back to Main</a>
+    </div>
+    <h1 class="main-title">L4 UDP Network Monitor</h1>
+    <div class="info-bar">Real-time Layer 4 UDP Statistics (Public IP: {{ server_ip_info }})</div>
+    <div class="controls">
+        <button class="action-button" onclick="copyToClipboard('{{ server_ip_info }}', this)">Copy Public IP ({{ server_ip_info }})</button>
+        <button class="action-button" onclick="copyToClipboard('{{ udp_port }}', this)">Copy UDP Port ({{ udp_port }})</button>
+    </div>
+    <div class="graph-container">
+        <canvas id="l4Chart"></canvas>
+    </div>
+    <div class="stats-container">
+        <div class="stat-item">
+            <div class="stat-label">UDP Packets (Monitored)</div>
+            <div class="stat-value" id="udpPercentage">0%</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-label">IP Fragments (of UDP)</div>
+            <div class="stat-value" id="fragmentedPercentage">0%</div>
+        </div>
+    </div>
+    <div class="footer-credits">
+        Credits: Notidom - Discord: sandra_pz7087689_71142
+    </div>
+
+    <script>
+        function copyToClipboard(text, buttonElement) {
+            navigator.clipboard.writeText(text).then(() => {
+                const originalText = buttonElement.innerText;
+                buttonElement.innerText = 'Copied!';
+                buttonElement.style.backgroundColor = '#28a745';
+                setTimeout(() => {
+                    buttonElement.innerText = originalText;
+                    buttonElement.style.backgroundColor = ''; 
+                }, 1500);
+            }).catch(err => {
+                alert('Failed to copy: ' + err);
+            });
+        }
+
+        function formatNumber(num, units, divisor, fixed = 1) {
+            if (num === undefined || num === null) num = 0;
+            if (num === 0) return '0 ' + units[0];
+            let unitIndex = 0;
+            while (Math.abs(num) >= divisor && unitIndex < units.length - 1) {
+                num /= divisor;
+                unitIndex++;
+            }
+            return num.toFixed(fixed) + ' ' + units[unitIndex];
+        }
+
+        function formatPps(pps) {
+            const units = ['pps', 'kpps', 'Mpps'];
+            return formatNumber(pps, units, 1000, pps < 1000 && pps > 0 ? 0 : 1);
+        }
+
+        function formatBandwidth(bps) {
+            const units = ['bps', 'kbps', 'Mbps', 'Gbps'];
+            return formatNumber(bps * 8, units, 1000); 
+        }
+
+        const MAX_DATA_POINTS = 60; 
+        let timeLabels = Array(MAX_DATA_POINTS).fill('');
+
+        const l4ChartCtx = document.getElementById('l4Chart').getContext('2d');
+        const l4Chart = new Chart(l4ChartCtx, {
+            type: 'line',
+            data: {
+                labels: timeLabels,
+                datasets: [
+                    {
+                        label: 'UDP Packets/sec',
+                        data: Array(MAX_DATA_POINTS).fill(0),
+                        borderColor: '#A0A0A0', 
+                        backgroundColor: 'rgba(160, 160, 160, 0.1)',
+                        borderWidth: 1.5,
+                        fill: true,
+                        tension: 0, 
+                        pointRadius: 1, 
+                        pointHitRadius: 10,
+                        pointHoverRadius: 4,
+                        yAxisID: 'yPps',
+                    },
+                    {
+                        label: 'UDP Bandwidth',
+                        data: Array(MAX_DATA_POINTS).fill(0),
+                        borderColor: '#5c9aff',
+                        backgroundColor: 'rgba(92, 154, 255, 0.1)',
+                        borderWidth: 1.5,
+                        fill: true,
+                        tension: 0,
+                        pointRadius: 1,
+                        pointHitRadius: 10,
+                        pointHoverRadius: 4,
+                        yAxisID: 'yBps',
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: {
+                    duration: 200, 
+                    easing: 'linear'
+                },
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                scales: {
+                    yPps: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        beginAtZero: true,
+                        min: 0, 
+                        ticks: {
+                            color: '#999999',
+                            font: { size: 10 },
+                            maxTicksLimit: 6,
+                            callback: function(value) { return formatPps(value); }
+                        },
+                        grid: { 
+                            color: 'rgba(255, 255, 255, 0.05)',
+                            borderColor: 'rgba(255, 255, 255, 0.05)',
+                            borderDash: [2, 3],
+                        }
+                    },
+                    yBps: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        beginAtZero: true,
+                         min: 0,
+                        ticks: {
+                            color: '#999999',
+                            font: { size: 10 },
+                            maxTicksLimit: 6,
+                            callback: function(value) { return formatBandwidth(value); }
+                        },
+                        grid: { display: false } 
+                    },
+                    x: {
+                        ticks: { display: false },
+                        grid: { display: false }
+                    }
+                },
+                plugins: {
+                    legend: { 
+                        display: true,
+                        position: 'top',
+                        align: 'end',
+                        labels: { 
+                            color: '#c0c0c0',
+                            font: { size: 11 },
+                            boxWidth: 15,
+                            padding: 15
+                        } 
+                    },
+                    tooltip: {
+                        enabled: true,
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(0,0,0,0.8)',
+                        titleFont: { size: 13 },
+                        bodyFont: { size: 12 },
+                        padding: 10,
+                        cornerRadius: 4,
+                        callbacks: {
+                            label: function(context) {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.parsed.y !== null) {
+                                    if (context.datasetIndex === 0) label += formatPps(context.parsed.y);
+                                    if (context.datasetIndex === 1) label += formatBandwidth(context.parsed.y);
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        const socket = io('/l4');
+        socket.on('l4_update', function(data) {
+            l4Chart.data.datasets[0].data = data.history_pps;
+            l4Chart.data.datasets[1].data = data.history_bps;
+            l4Chart.update('none'); 
+            
+            document.getElementById('udpPercentage').textContent = data.udp_percentage + '%';
+            document.getElementById('fragmentedPercentage').textContent = data.fragmented_percentage + '%';
+        });
+    </script>
+</body>
+</html>
