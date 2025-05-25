@@ -14,7 +14,7 @@ app.config['SECRET_KEY'] = 'secret_idom_key_l4_udp_only_v1!'
 socketio = SocketIO(app, async_mode='gevent')
 
 MONITORED_UDP_PORT = 53
-WEB_APP_PORT = 80 
+WEB_APP_PORT = 5000
 
 l4_stats_totals = {
     'udp_packets_count': 0,
