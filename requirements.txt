@@ -3,3 +3,5 @@ Flask-SocketIO==5.3.6
 python-socketio==5.8.0
 eventlet==0.33.3
 requests==2.31.0
+gevent-websocket>=0.10.1
+gevent>=21.8.0
